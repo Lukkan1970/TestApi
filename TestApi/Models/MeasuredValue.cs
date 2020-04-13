@@ -5,7 +5,7 @@ namespace TestApi.Models
 {
     public class MeasuredValue
     {
-        public DateTime Date { get; set; }
+        public string Date { get; set; }
         public IEnumerable<SensorTypeValue> SensorValues { get; set; }
     }
 }

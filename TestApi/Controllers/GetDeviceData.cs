@@ -17,11 +17,11 @@ namespace TestApi.Controllers
         }
 
         [HttpGet]
-        public DeviceMeasuredValues Get(string apiVersion, string deviceId, string date, string? sensorType)
+        public async System.Threading.Tasks.Task<DeviceMeasuredValues> GetAsync(string apiVersion, string deviceId, string date, string? sensorType)
         {
             DeviceMeasuredValues deviceMeasuredValues = apiVersion.ToUpper() switch
             {
-                "V1" => V1.GetValues(deviceId, date, sensorType),
+                "V1" => await V1.GetValuesAsync(deviceId, date, sensorType),
                 _ => new DeviceMeasuredValues { Name = "Wrong API version"}
             };
 

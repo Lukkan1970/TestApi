@@ -10,7 +10,7 @@ using TestApi.Models;
 
 namespace TestApi.AzureBlobFunctions
 {
-   
+
     public class AzureBlobRetriever
     {
         private static CloudBlobClient _Client = null;
@@ -28,7 +28,7 @@ namespace TestApi.AzureBlobFunctions
         {
             InitClient();
             var dev = new DeviceMeasuredValues();
-            
+
             CloudBlobContainer container = await GetContainerAsync(_Client);
             dev.Name = container.Name;
 
@@ -41,7 +41,23 @@ namespace TestApi.AzureBlobFunctions
                 return dev;
             }
 
+            List<string> sensorTypes = GetSensorTypesForDevice(resultSegment, deviceId);
+
+            if (sensorType != null && !sensorTypes.Contains(sensorType) )
+            {
+                dev.Name = "SensorType does not exist";
+                return dev;
+            }
+
+           
             return dev;
+        }
+
+        private static List<string> GetSensorTypesForDevice(BlobResultSegment resultSegment, string deviceId)
+        {
+            List<string> ret = new List<string>();
+            var numberOfBlobs = resultSegment.Results.Cast<CloudBlob>().Where(t => t.Name.StartsWith(deviceId)).ToList();
+            return = numberOfBlobs.Select(n => n.Name.Split('/')[1]).Distinct().ToList();
         }
 
         private static bool CheckIfDeviceIdExist(BlobResultSegment resultSegment, string deviceId)
@@ -53,7 +69,6 @@ namespace TestApi.AzureBlobFunctions
         private static async Task<CloudBlobContainer> GetContainerAsync(CloudBlobClient cloudBlobClient)
         {
             var containers = new List<CloudBlobContainer>();
-
             ContainerResultSegment response = await cloudBlobClient.ListContainersSegmentedAsync(null);
             containers.AddRange(response.Results);
 

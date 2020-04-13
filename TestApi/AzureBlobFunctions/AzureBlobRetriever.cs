@@ -13,19 +13,12 @@ namespace TestApi.AzureBlobFunctions
    
     public class AzureBlobRetriever
     {
-#pragma warning disable CS8625 // Cannot convert null literal to non-nullable reference type.
         private static CloudBlobClient _Client = null;
-#pragma warning restore CS8625 // Cannot convert null literal to non-nullable reference type.
-
         private static string accountName = "sigmaiotexercisetest";
         private static string SAS = "?sv=2017-11-09&ss=bfqt&srt=sco&sp=rl&se=2028-09-27T16:27:24Z&st=2018-09-27T08:27:24Z&spr=https&sig=eYVbQneRuiGn103jUuZvNa6RleEeoCFx1IftVin6wuA%3D";
 
-
-
-        public static void InitClient()
+        private static void InitClient()
         {
-            //var saName = _Context.Properties["AzureStorageAccountName"] as string;
-            //var saKey = _Context.Properties["AzureStorageAccountAccessKey1"] as string;
             var storageCredentials = new StorageCredentials(SAS);
             var cloudStorageAccount = new CloudStorageAccount(storageCredentials, accountName, endpointSuffix: null, useHttps: true);
             _Client = cloudStorageAccount.CreateCloudBlobClient();
@@ -39,7 +32,22 @@ namespace TestApi.AzureBlobFunctions
             CloudBlobContainer container = await GetContainerAsync(_Client);
             dev.Name = container.Name;
 
+            BlobResultSegment resultSegment = await container.ListBlobsSegmentedAsync(string.Empty,
+                       true, BlobListingDetails.Metadata, null, null, null, null);
+
+            if (!CheckIfDeviceIdExist(resultSegment, deviceId))
+            {
+                dev.Name = "DeviceId does not exist";
+                return dev;
+            }
+
             return dev;
+        }
+
+        private static bool CheckIfDeviceIdExist(BlobResultSegment resultSegment, string deviceId)
+        {
+            var numberOfBlobs = resultSegment.Results.Cast<CloudBlob>().Where(t => t.Name.StartsWith(deviceId)).ToList();
+            return numberOfBlobs.Count > 0;
         }
 
         private static async Task<CloudBlobContainer> GetContainerAsync(CloudBlobClient cloudBlobClient)

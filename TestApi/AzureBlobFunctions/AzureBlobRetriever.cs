@@ -34,9 +34,7 @@ namespace TestApi.AzureBlobFunctions
             };
 
             CloudBlobContainer container = await GetContainerAsync(_Client);
-
-            BlobResultSegment resultSegment = await container.ListBlobsSegmentedAsync(string.Empty,
-                       true, BlobListingDetails.Metadata, null, null, null, null);
+            BlobResultSegment resultSegment = await container.ListBlobsSegmentedAsync(string.Empty, true, BlobListingDetails.Metadata, null, null, null, null);
 
             if (!CheckIfDeviceIdExist(resultSegment, deviceId))
             {
@@ -88,6 +86,7 @@ namespace TestApi.AzureBlobFunctions
             {
                 device.Name = "No data found that date";
             }
+
             device.MeasuredValues = allSensorValues;
 
             return device;
@@ -96,7 +95,7 @@ namespace TestApi.AzureBlobFunctions
         private static async Task<List<MeasuredValue>> GetSensorFileAsync(CloudBlobContainer container, string deviceId, string date, string sensor)
         {
             List<MeasuredValue> data = new List<MeasuredValue>();
-            string csvText = await GetCsvFileAsync(container, deviceId, date, sensor);
+            string csvText = await GetFileFromAzure(container, deviceId, date, sensor);
 
             var lines = csvText.Split(new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries);
 
@@ -119,40 +118,53 @@ namespace TestApi.AzureBlobFunctions
             return data;
         }
 
-        private static async Task<string> GetCsvFileAsync(CloudBlobContainer container, string deviceId, string date, string sensor)
+        private static async Task<string> GetFileFromAzure(CloudBlobContainer container, string deviceId, string date, string sensor)
         {
-            string csvText = String.Empty;
+            string text = String.Empty;
             string blobPath = deviceId + "/" + sensor + "/" + date + ".csv";
+            string zipPath = deviceId + "/" + sensor + "/historical.zip";
+
             if (await container.GetAppendBlobReference(blobPath).ExistsAsync())
             {
-                CloudAppendBlob blob = container.GetAppendBlobReference(blobPath);
-                csvText = await blob.DownloadTextAsync();
+                text = await GetCsvFileFromAzure(container, blobPath);
+            }
+            else if (await container.GetBlockBlobReference(zipPath).ExistsAsync())
+            {
+                text = await GetZipFileFromAzure(container, date, zipPath);
+            }
+
+            return text;
+        }
+
+        private static async Task<string> GetZipFileFromAzure(CloudBlobContainer container, string date, string zipPath)
+        {
+            CloudBlockBlob zipBlob = container.GetBlockBlobReference(zipPath);
+
+            using var blobStream = new MemoryStream();
+            await zipBlob.DownloadToStreamAsync(blobStream);
+
+            using ZipArchive zip = new ZipArchive(blobStream);
+            var entryName = date + ".csv";
+            var entry = zip.Entries.Where(e => e.Name == entryName).FirstOrDefault();
+
+            if (entry != null)
+            {
+                using StreamReader sr = new StreamReader(entry.Open());
+                return sr.ReadToEnd();
             }
             else
-            {
-                string zipPath = deviceId + "/" + sensor + "/historical.zip";
-                bool test = await container.GetBlockBlobReference(zipPath).ExistsAsync();
-                CloudBlockBlob zipBlob = container.GetBlockBlobReference(zipPath);
-             
-                using var blobStream = new MemoryStream();
-                await zipBlob.DownloadToStreamAsync(blobStream);
-                
-                using ZipArchive zip = new ZipArchive(blobStream);
-                var entryName = date + ".csv";
-                var entry = zip.Entries.Where(e => e.Name == entryName).FirstOrDefault();
-                if (entry != null)
-                {
-                    using StreamReader sr = new StreamReader(entry.Open());
-                    csvText = sr.ReadToEnd();
-                }
-            }
-           
+                return string.Empty;
+        }
+
+        private static async Task<string> GetCsvFileFromAzure(CloudBlobContainer container, string blobPath)
+        {
+            CloudAppendBlob blob = container.GetAppendBlobReference(blobPath);
+            string csvText = await blob.DownloadTextAsync();
             return csvText;
         }
 
         private static List<string> GetSensorTypesForDevice(BlobResultSegment resultSegment, string deviceId)
         {
-            List<string> ret = new List<string>();
             var numberOfBlobs = resultSegment.Results.Cast<CloudBlob>().Where(t => t.Name.StartsWith(deviceId)).ToList();
             return numberOfBlobs.Select(n => n.Name.Split('/')[1]).Distinct().ToList();
         }

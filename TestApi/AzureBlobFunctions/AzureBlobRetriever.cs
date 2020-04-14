@@ -1,14 +1,11 @@
-﻿using Microsoft.AspNetCore.Mvc;
-using Microsoft.WindowsAzure.Storage;
+﻿using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Auth;
 using Microsoft.WindowsAzure.Storage.Blob;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
-using System.Runtime.ExceptionServices;
-using System.Runtime.InteropServices.ComTypes;
-using System.Runtime.InteropServices.WindowsRuntime;
 using System.Threading.Tasks;
 using TestApi.Models;
 
@@ -18,8 +15,8 @@ namespace TestApi.AzureBlobFunctions
     public class AzureBlobRetriever
     {
         private static CloudBlobClient _Client = null;
-        private static string accountName = "sigmaiotexercisetest";
-        private static string SAS = "?sv=2017-11-09&ss=bfqt&srt=sco&sp=rl&se=2028-09-27T16:27:24Z&st=2018-09-27T08:27:24Z&spr=https&sig=eYVbQneRuiGn103jUuZvNa6RleEeoCFx1IftVin6wuA%3D";
+        private static readonly string accountName = "sigmaiotexercisetest";
+        private static readonly string SAS = "?sv=2017-11-09&ss=bfqt&srt=sco&sp=rl&se=2028-09-27T16:27:24Z&st=2018-09-27T08:27:24Z&spr=https&sig=eYVbQneRuiGn103jUuZvNa6RleEeoCFx1IftVin6wuA%3D";
 
         private static void InitClient()
         {
@@ -31,8 +28,10 @@ namespace TestApi.AzureBlobFunctions
         internal static async Task<DeviceMeasuredValues> GetMeasuredValuesAsync(string deviceId, string date, string? sensorType)
         {
             InitClient();
-            var dev = new DeviceMeasuredValues();
-            dev.Name = deviceId;
+            var device = new DeviceMeasuredValues
+            {
+                Name = deviceId
+            };
 
             CloudBlobContainer container = await GetContainerAsync(_Client);
 
@@ -41,97 +40,114 @@ namespace TestApi.AzureBlobFunctions
 
             if (!CheckIfDeviceIdExist(resultSegment, deviceId))
             {
-                dev.Name = "DeviceId does not exist";
-                return dev;
+                device.Name = "DeviceId does not exist";
+                return device;
             }
 
             List<string> sensorTypes = GetSensorTypesForDevice(resultSegment, deviceId);
 
             if (sensorType != null && !sensorTypes.Contains(sensorType))
             {
-                dev.Name = "SensorType does not exist";
-                return dev;
+                device.Name = "SensorType does not exist";
+                return device;
             }
 
             List<string> selectedSensorTypes = sensorType != null ? new List<string> { sensorType } : sensorTypes;
 
-            List<List<SensorTypeValue>> listOfSensorValues = new List<List<SensorTypeValue>>();
+            List<MeasuredValue> allSensorValues = new List<MeasuredValue>();
+
+            List<Task<List<MeasuredValue>>> tasks = new List<Task<List<MeasuredValue>>>();
 
             foreach (var sensor in selectedSensorTypes)
             {
-                List<SensorTypeValue> sensorValues = new List<SensorTypeValue>();
-                List<SensorTypeValue> mySensorFile = await GetSensorFileAsync(container, deviceId, date, sensor);
-                listOfSensorValues.Add(mySensorFile);
+                Task<List<MeasuredValue>> theTask = GetSensorFileAsync(container, deviceId, date, sensor);
+                tasks.Add(theTask);
 
             }
-            List<MeasuredValue> firstSensorValues = await GetFirstSensorFileAsync(container, deviceId, date, selectedSensorTypes.First());
-          
-            
-            foreach (var sensor in selectedSensorTypes)
+            await Task.WhenAll(tasks);
+
+            foreach (var task in tasks)
             {
-                List<SensorTypeValue> mySensorFile = await GetSensorFileAsync(container, deviceId, date, sensor);
-                listOfSensorValues.Add(mySensorFile);
-
+                List<MeasuredValue> sensorFile = task.Result;
+                if (task == tasks.First())
+                {
+                    allSensorValues = sensorFile;
+                }
+                else
+                {
+                    allSensorValues = allSensorValues.Zip(sensorFile, (first, second) =>
+                    {
+                        MeasuredValue mv = first;
+                        mv.SensorValues.Add(second.SensorValues[0]);
+                        return mv;
+                    }).ToList();
+                }
             }
 
-            dev.MeasuredValues = firstSensorValues;
-            return dev;
+            if (allSensorValues.Count == 0)
+            {
+                device.Name = "No data found that date";
+            }
+            device.MeasuredValues = allSensorValues;
+
+            return device;
         }
 
-        private static async Task<List<MeasuredValue>> GetFirstSensorFileAsync(CloudBlobContainer container, string deviceId, string date, string sensor)
+        private static async Task<List<MeasuredValue>> GetSensorFileAsync(CloudBlobContainer container, string deviceId, string date, string sensor)
         {
             List<MeasuredValue> data = new List<MeasuredValue>();
-            string blobPath = deviceId + "/" + sensor + "/" + date + ".csv";
-            CloudAppendBlob blob = container.GetAppendBlobReference(blobPath);
+            string csvText = await GetCsvFileAsync(container, deviceId, date, sensor);
 
-            string csvText = await blob.DownloadTextAsync();
             var lines = csvText.Split(new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries);
 
             foreach (var line in lines)
             {
-                var lineSplit = line.Split(',');
-               
-                var lineTime = lineSplit[0].Trim(new char[] { ',', '-', ';' });
-                var value = lineSplit[1];
+                var lineSplit = line.Split(';');
+                var lineTime = lineSplit[0];
+                var lineValue = lineSplit[1];
                 data.Add(new MeasuredValue
                 {
                     Date = lineTime,
                     SensorValues = new List<SensorTypeValue> { new SensorTypeValue
                     {
                         SensorType = sensor,
-                        SensorValue = value
+                        SensorValue = lineValue
                     }
                 }
                 });
             }
-
-
-           
             return data;
-
         }
 
-        private static async Task<List<SensorTypeValue>> GetSensorFileAsync(CloudBlobContainer container, string deviceId, string date, string sensor)
+        private static async Task<string> GetCsvFileAsync(CloudBlobContainer container, string deviceId, string date, string sensor)
         {
-            List<SensorTypeValue> data = new List<SensorTypeValue>();
+            string csvText = String.Empty;
             string blobPath = deviceId + "/" + sensor + "/" + date + ".csv";
-            CloudAppendBlob blob = container.GetAppendBlobReference(blobPath);
-            string text;
-            string myText = await blob.DownloadTextAsync();
-            var test = myText.Split(new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries);
-
-            foreach (var line in test)
+            if (await container.GetAppendBlobReference(blobPath).ExistsAsync())
             {
-                var temp = line.Split(',');
-                if (temp.Length < 2)
-                {
-                    var tpp = temp;
-                }
-                var ff = temp[1];
-                data.Add(new SensorTypeValue {SensorType=sensor, SensorValue=ff});
+                CloudAppendBlob blob = container.GetAppendBlobReference(blobPath);
+                csvText = await blob.DownloadTextAsync();
             }
-
-            return data;
+            else
+            {
+                string zipPath = deviceId + "/" + sensor + "/historical.zip";
+                bool test = await container.GetBlockBlobReference(zipPath).ExistsAsync();
+                CloudBlockBlob zipBlob = container.GetBlockBlobReference(zipPath);
+             
+                using var blobStream = new MemoryStream();
+                await zipBlob.DownloadToStreamAsync(blobStream);
+                
+                using ZipArchive zip = new ZipArchive(blobStream);
+                var entryName = date + ".csv";
+                var entry = zip.Entries.Where(e => e.Name == entryName).FirstOrDefault();
+                if (entry != null)
+                {
+                    using StreamReader sr = new StreamReader(entry.Open());
+                    csvText = sr.ReadToEnd();
+                }
+            }
+           
+            return csvText;
         }
 
         private static List<string> GetSensorTypesForDevice(BlobResultSegment resultSegment, string deviceId)

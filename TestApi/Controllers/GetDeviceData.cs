@@ -9,13 +9,6 @@ namespace TestApi.Controllers
     [Route("api/{apiVersion}/device/{deviceId}/data/{date}/{sensorType?}")]
     public class GetDeviceData : ControllerBase
     {
-        private readonly ILogger<GetDeviceData> _logger;
-
-        public GetDeviceData(ILogger<GetDeviceData> logger)
-        {
-            _logger = logger;
-        }
-
         [HttpGet]
         public async System.Threading.Tasks.Task<DeviceMeasuredValues> GetAsync(string apiVersion, string deviceId, string date, string? sensorType)
         {

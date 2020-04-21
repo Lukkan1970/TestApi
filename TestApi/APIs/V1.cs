@@ -6,11 +6,11 @@ namespace TestApi.APIs
 {
     public static class V1
     {
-        public static async Task<DeviceMeasuredValues> GetValuesAsync(string deviceId, string date, string? sensorType)
+        public static async Task<string> GetValuesAsync(string deviceId, string date, string? sensorType)
         {
             DeviceMeasuredValues measuredValues = await AzureBlobRetriever.GetMeasuredValuesAsync(deviceId, date, sensorType);
-
-            return measuredValues;
+            var result = Newtonsoft.Json.JsonConvert.SerializeObject(measuredValues);
+            return result;
         }
     }
 }

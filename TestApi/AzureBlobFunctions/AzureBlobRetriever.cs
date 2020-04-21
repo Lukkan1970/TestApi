@@ -8,6 +8,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Threading.Tasks;
 using TestApi.Models;
+using FSharpTestApi;
 
 namespace TestApi.AzureBlobFunctions
 {

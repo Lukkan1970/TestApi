@@ -10,14 +10,17 @@ namespace TestApi.Controllers
     public class GetDeviceData : ControllerBase
     {
         [HttpGet]
-        public async System.Threading.Tasks.Task<DeviceMeasuredValues> GetAsync(string apiVersion, string deviceId, string date, string? sensorType)
+        public async System.Threading.Tasks.Task<string?> GetAsync(string apiVersion, string deviceId, string date, string? sensorType)
         {
-            DeviceMeasuredValues deviceMeasuredValues = apiVersion.ToUpper() switch
+            var retVal = new DeviceMeasuredValues { Name = "Wrong API version" };
+            var result = Newtonsoft.Json.JsonConvert.SerializeObject(retVal);
+
+            string? deviceMeasuredValues = apiVersion.ToUpper() switch
             {
                 "V1" => await V1.GetValuesAsync(deviceId, date, sensorType),
-                _ => new DeviceMeasuredValues { Name = "Wrong API version"}
+                "F1"=> await F1.GetValuesAsync(deviceId, date, sensorType),
+                _ => result
             };
-
             return deviceMeasuredValues;
         }
        

@@ -6,6 +6,8 @@ using TestApi.Models;
 using FSharpTestApi;
 using FSharp.Data;
 
+#nullable enable
+
 namespace TestApi.APIs
 {
     public class F1

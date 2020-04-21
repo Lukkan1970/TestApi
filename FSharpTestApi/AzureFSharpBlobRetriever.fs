@@ -11,6 +11,8 @@ open Microsoft.WindowsAzure
 open Microsoft.WindowsAzure.Storage
 open Microsoft.WindowsAzure.Storage.Blob
 
+open System.IO.Compression
+
 module FSharpTestApiModule =
 
     let accountName = "sigmaiotexercisetest";
@@ -33,12 +35,76 @@ module FSharpTestApiModule =
         let response = client.ListContainersSegmentedAsync(null) |> Async.AwaitTask
         response
 
-    let CheckIfDeviceIdExist (blobs:BlobResultSegment) (deviceId:string)  =
-        let temp = blobs.Results
-        let temp2 = List.ofSeq temp
-        temp2
+    let CheckIfDeviceIdExist (blobs:IListBlobItem list) (deviceId:string)  =
+        blobs
         |> List.map(fun x -> x :?> CloudBlob)
-        |> List.tryFind(fun x -> x.Name = deviceId)
+        |> List.filter (fun x -> x.Name.StartsWith(deviceId))
+
+    let GetSensorTypesForDevice (blobs:CloudBlob list) (deviceId:string)  =
+        blobs
+        |> List.map(fun x -> x.Name)
+        |> List.map(fun x -> (x.Split("/")).[1])
+        |> List.distinct
+
+    let GetCheckSensorType (sensorTypes: string list) (sensorType: string) =
+        let containsSensorType = sensorTypes |> List.contains sensorType
+        if sensorType <> null && not containsSensorType
+        then false
+        else true
+        
+    let  GetSelectedSensorTypes  (sensorTypes: string list) (sensorType: string) =
+        match sensorType with
+        | null -> sensorTypes
+        | _ -> [sensorType]
+
+    let GetZipFileFromAzureAsync (container: CloudBlobContainer) (date: string) (zipPath: string) = async {
+        use blobStream = new MemoryStream()
+        let zipBlob = container.GetBlockBlobReference(zipPath)
+        let temp = zipBlob.DownloadToStreamAsync(blobStream) |> Async.AwaitTask |> Async.RunSynchronously
+
+        use zip =  new ZipArchive(blobStream)
+        let entryName = date + ".csv"
+        let entry = zip.GetEntry(entryName)
+            
+        if entry <> null
+        then
+            use sr = new StreamReader(entry.Open())
+            let! zipText = sr.ReadToEndAsync() |> Async.AwaitTask
+            return zipText
+        else
+            let noData = (ResultData.Root("No data found that date", null)).JsonValue
+            return noData.ToString()
+        }
+
+    let GetFileFromAzureAsync (container: CloudBlobContainer) (deviceId:string) (date: string) (sensorType: string ) = async {
+        let text = String.Empty
+        let blobPath = deviceId + "/" + sensorType + "/" + date + ".csv"
+        let zipPath = deviceId + "/" + sensorType + "/historical.zip"
+        if (container.GetAppendBlobReference(blobPath).ExistsAsync() |> Async.AwaitTask |> Async.RunSynchronously)
+        then 
+            let blob = container.GetAppendBlobReference(blobPath) 
+            let! csvText = blob.DownloadTextAsync() |> Async.AwaitTask
+            return csvText
+        else if (container.GetBlockBlobReference(zipPath).ExistsAsync() |> Async.AwaitTask |> Async.RunSynchronously)
+        then
+            let! zipText  = (GetZipFileFromAzureAsync container date zipPath) 
+            return zipText
+        else
+            let noData = (ResultData.Root("No data found that date", null)).JsonValue
+            return noData.ToString()
+        }
+        
+
+    let DownloadFiles (container: CloudBlobContainer) (deviceId:string) (date: string) (sensorTypes: string list) = 
+        //sensorTypes
+        let test = GetFileFromAzureAsync container deviceId date sensorTypes.[0]
+        let testRes = test |> Async.RunSynchronously
+        let multi = 
+            sensorTypes
+            |> List.map(fun x -> GetFileFromAzureAsync container deviceId date x)
+            |> Async.Parallel
+            |> Async.RunSynchronously
+        multi
 
 
     let GetMeasuredValuesAsync (deviceId: string) (date:string) (sensorType:string) = 
@@ -55,26 +121,29 @@ module FSharpTestApiModule =
         let resultSegment =  container2.Results 
         let myList = List.ofSeq resultSegment
         let myCont = myList.[0]
-       // let resultSegment2 = ListBlobsSegmentedInFlatListing myList.[0] |> Async.RunSynchronously
-        //let resultSegment = 
-        //    myCont.ListBlobsSegmentedAsync(
-        //        "", true, BlobListingDetails.All, Nullable 10, 
-        //        null, null, null, Threading.CancellationToken.None) 
-        //    |> Async.AwaitTask
+     
+        let test = myCont.ListBlobsSegmentedAsync("", true, BlobListingDetails.Metadata, System.Nullable(), null, null, null)
+        let myBlobs = (test |> Async.AwaitTask |> Async.RunSynchronously).Results |> List.ofSeq
+
+        let firstCheck = CheckIfDeviceIdExist myBlobs deviceId
+
+        let wrongDeviceID = (ResultData.Root("DeviceId does not exist", null)).JsonValue
+
+        let wrongSensorType = (ResultData.Root("SensorType does not exist", null)).JsonValue
+
+        let sensorTypes = GetSensorTypesForDevice firstCheck deviceId
+
+        let checkSensorType = GetCheckSensorType sensorTypes sensorType
+
+        let selectedSensorTypes = GetSelectedSensorTypes sensorTypes sensorType
+
+        let myFiles = DownloadFiles myCont deviceId date selectedSensorTypes
+
+        match firstCheck.Length, checkSensorType with
+        | 0, _ -> wrongDeviceID
+        | _, false -> wrongSensorType
+        | _, _ -> value
         
-        let test = myCont.ListBlobsSegmentedAsync("", true, BlobListingDetails.Metadata, Nullable 10, null, null, null)
-        let myBlobs = test |> Async.AwaitTask |> Async.RunSynchronously
-
-        let firstCheck = CheckIfDeviceIdExist
-
-        
-        value
-       
-
-       //.ListBlobsSegmentedAsync(string.Empty, true, BlobListingDetails.Metadata, null, null, null, null);
-
-       //  BlobResultSegment
-       
 
     
 

@@ -1,4 +1,5 @@
 ﻿namespace TestApi.Models
+
 {
     public class SensorTypeValue
     {

@@ -2,6 +2,8 @@
 using TestApi.AzureBlobFunctions;
 using TestApi.Models;
 
+#nullable enable
+
 namespace TestApi.APIs
 {
     public static class V1

@@ -10,12 +10,16 @@ using System.Threading.Tasks;
 using TestApi.Models;
 using FSharpTestApi;
 
+#nullable enable
+
 namespace TestApi.AzureBlobFunctions
 {
 
     public class AzureBlobRetriever
     {
+#pragma warning disable CS8625 // Cannot convert null literal to non-nullable reference type.
         private static CloudBlobClient _Client = null;
+#pragma warning restore CS8625 // Cannot convert null literal to non-nullable reference type.
         private static readonly string accountName = "sigmaiotexercisetest";
         private static readonly string SAS = "?sv=2017-11-09&ss=bfqt&srt=sco&sp=rl&se=2028-09-27T16:27:24Z&st=2018-09-27T08:27:24Z&spr=https&sig=eYVbQneRuiGn103jUuZvNa6RleEeoCFx1IftVin6wuA%3D";
 

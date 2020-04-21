@@ -3,6 +3,8 @@ using Microsoft.Extensions.Logging;
 using TestApi.APIs;
 using TestApi.Models;
 
+#nullable enable
+
 namespace TestApi.Controllers
 {
     [ApiController]

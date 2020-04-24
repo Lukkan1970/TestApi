@@ -84,14 +84,14 @@ module FSharpTestApiModule =
         then 
             let blob = container.GetAppendBlobReference(blobPath) 
             let! csvText = blob.DownloadTextAsync() |> Async.AwaitTask
-            return csvText
+            return sensorType, csvText
         else if (container.GetBlockBlobReference(zipPath).ExistsAsync() |> Async.AwaitTask |> Async.RunSynchronously)
         then
             let! zipText  = (GetZipFileFromAzureAsync container date zipPath) 
-            return zipText
+            return sensorType, zipText
         else
             let noData = (ResultData.Root("No data found that date", null)).JsonValue
-            return noData.ToString()
+            return sensorType, noData.ToString()
         }
         
 
@@ -99,13 +99,65 @@ module FSharpTestApiModule =
         //sensorTypes
         let test = GetFileFromAzureAsync container deviceId date sensorTypes.[0]
         let testRes = test |> Async.RunSynchronously
+        let splitter = [Environment.NewLine]
         let multi = 
             sensorTypes
             |> List.map(fun x -> GetFileFromAzureAsync container deviceId date x)
             |> Async.Parallel
             |> Async.RunSynchronously
+            |> Array.map(fun x ->(fst x), (snd x).Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries))
+            |> Array.map(fun x -> (fst x), (snd x) |> Array.map(fun y -> y.Split(';')))
+            |> Array.map(fun x -> snd x |> Array.map (fun y -> fst x, y.[0], y.[1]))
         multi
 
+    let ReorganizeOneFile (deviceID : string) (myFile: ( string * string * string)  []) =
+        //let mySensor = "mySensor"
+        //let myString = "myString"
+        let all = 
+            myFile
+            |> Array.map (fun (sensor, date, value) ->  ResultData.MeasuredValue(DateTime.Parse date, [|ResultData.SensorValue(sensor, ResultData.DecimalOrString(value))|] ))
+        //let myDecimalOrString = ResultData.DecimalOrString(myString)
+        //let mySensorValue = [|ResultData.SensorValue(mySensor, myDecimalOrString)|]
+        //let myDate = DateTime.Now
+        //let myMeasuredValue = [|ResultData.MeasuredValue(myDate, mySensorValue)|]
+        let temp = all
+        let myName = deviceID
+        let myRoot = ResultData.Root( myName, all) 
+        myRoot
+
+    let zipAllFiles (firstFile: ResultData.Root ) (allFiles : (string*string*string)[] ) = 
+        let tempMes : ResultData.MeasuredValue [] = firstFile.MeasuredValues
+
+        //let myFile = tempMes |>Array.take 10 |> Array.map(fun x -> x.SensorValues) 
+        let myFile = tempMes |> Array.map(fun x -> x.SensorValues) 
+
+        
+        let secondFile =
+            allFiles
+            |> Array.map(fun (sensor, _, value) -> ResultData.SensorValue(sensor, ResultData.DecimalOrString(value)))
+
+
+        let mapped = Array.map2(fun (x: ResultData.SensorValue[]) (y: ResultData.SensorValue) -> Array.append x [|y|] ) myFile secondFile
+        
+        //let newFile = Array.map2(fun x y -> ResultData.MeasuredValue(x.Date, y) ) tempMes mapped
+        let newFile = Array.map2(fun (x:ResultData.MeasuredValue)  (y:ResultData.SensorValue []) -> 
+                            let myDate : DateTime = x.Date
+                            let mSensoorValue = y
+                            ResultData.MeasuredValue(myDate, mSensoorValue)
+                            ) (tempMes : ResultData.MeasuredValue []) (mapped : ResultData.SensorValue [][])
+        ResultData.Root(firstFile.Name, newFile)
+        
+
+    let ReorgnanizeFiles (deviceID : string) (myFiles: (string*string*string)[] list)  = 
+        let firstFile = (ReorganizeOneFile deviceID myFiles.[0] )
+       
+        //let allZipedFiles = zipAllFiles firstFile myFiles
+        let allZipedFiles =List.fold(fun acc elem -> zipAllFiles acc elem) firstFile (myFiles |> List.skip 1)
+        //let secondFile = zipAllFiles firstFile myFiles.[1] 
+        //let thirdFile = zipAllFiles secondFile myFiles.[2] 
+        allZipedFiles
+        //myFiles
+        //|> List.map (ReorganizeOneFile deviceID)
 
     let GetMeasuredValuesAsync (deviceId: string) (date:string) (sensorType:string) = 
         let result = ResultData.GetSample
@@ -137,12 +189,25 @@ module FSharpTestApiModule =
 
         let selectedSensorTypes = GetSelectedSensorTypes sensorTypes sensorType
 
-        let myFiles = DownloadFiles myCont deviceId date selectedSensorTypes
+        let myFiles = (DownloadFiles myCont deviceId date selectedSensorTypes) |> Array.toList
+
+        let myParse2 = myFiles.[0]
+
+        let sec = myParse2.ToString()
+        //let secsec = sec.[0].ToString()
+
+       // let myValue = JsonValue.Parse( sec )
+
+       // let myParse = ResultData.Parse(myFiles.[0])
+
+        //let temp2 = SensorResult.Parse(myFiles.[0])
+
+        let reorganizedFiles = ReorgnanizeFiles deviceId myFiles
 
         match firstCheck.Length, checkSensorType with
         | 0, _ -> wrongDeviceID
         | _, false -> wrongSensorType
-        | _, _ -> value
+        | _, _ -> reorganizedFiles.JsonValue
         
 
     
